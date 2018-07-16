@@ -11,6 +11,12 @@ Keras implementation of [Efficient Neural Architecture Search](https://arxiv.org
 - Keras 2.1.5+
 - Tensorflow 1.0.1+
 
+## Recommended
+- GPU
+
+# Micro search
+Run either ENAS_Keras.py or ENAS_Keras.ipynb on Jupyter Notebook to micro search CNN cells using [Cifar10](https://www.cs.toronto.edu/~kriz/cifar.html).
+
 # Files
 
 ```
