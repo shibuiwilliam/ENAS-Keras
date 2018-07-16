@@ -274,7 +274,6 @@ for e in range(search_epochs):
   child_train_records.append(train_record)
     
   if e == search_epochs - 1:
-    clear_output(wait=True)
     break
     
   del CNM.model
@@ -303,7 +302,6 @@ for e in range(search_epochs):
   print("{0} FINISHED SEARCH EPOCH {1} / {2} {0}".format(_sep,
                                                          e, 
                                                          search_epochs))
-  clear_output(wait=True)
     
 print("{0} FINISHED NEURAL ARCHITECTURE SEARCH {0}".format(_sep))
 print("training records:\n{0}".format(child_train_records))
