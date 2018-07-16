@@ -26,8 +26,8 @@ Keras implementation of [Efficient Neural Architecture Search](https://arxiv.org
 ```
 
 # Other implementations
-[Tensorflow](https://github.com/melodyguan/enas)
-[Pytorch](https://github.com/carpedm20/ENAS-pytorch)
+- [Tensorflow](https://github.com/melodyguan/enas)
+- [Pytorch](https://github.com/carpedm20/ENAS-pytorch)
 
 # Reference
 - [Neural Architecture Search with Reinforcement Learning](https://arxiv.org/abs/1611.01578)
