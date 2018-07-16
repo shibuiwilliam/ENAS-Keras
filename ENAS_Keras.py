@@ -96,7 +96,7 @@ child_input_shape=(32,32,3)
 child_init_filters=64
 child_network_definition=["N","N","R","N","N","R"]
 child_weight_directory="./weights"
-initialize_child_weight_directory=True
+initialize_child_weight_directory=False
 
 child_opt_loss='categorical_crossentropy'
 child_opt=Adam(lr=0.0001, decay=1e-6, amsgrad=True)
@@ -271,7 +271,7 @@ for e in range(search_epochs):
   print("epoch: {0}\nrecord: ".format(e))
   for k,v in child_train_record.items():
     print("{0}: {1}".format(k,v))
-  child_train_records.append(train_record)
+  child_train_records.append(child_train_record)
     
   if e == search_epochs - 1:
     break
