@@ -6,7 +6,6 @@ import sys
 import random
 import string
 
-
 def get_random_str(length=10, choices=None):
   choice_char = ""
   if choices is None:
@@ -26,7 +25,6 @@ def get_random_str(length=10, choices=None):
   random_str = ''.join([random.choice(choice_char) for _ in range(length)])
   return random_str
 
-
 def get_size_str(kernel_size, filters):
   if type(kernel_size) == tuple:
     size = list(kernel_size)
@@ -39,19 +37,25 @@ def get_int_list_in_str(int_list, separator="x"):
     int_list = list(int_list)
   return separator.join([str(i) for i in int_list])
 
-
 def generate_random_cell(num_nodes=5, 
                          num_opers=5):
+  """
+  node_num = operation node in int; starts from 2
+  inputs = input node num in int
+  oper_id = operation id in int
+  {node_num(int): {L: {input_layer:(int), oper_id:(int)},
+                   R: {input_layer:(int), oper_id:(int)}},
+   node_num(int): {L: {input_layer:(int), oper_id:(int)},
+                   R: {input_layer:(int), oper_id:(int)}} ... }
+  """
+  
   cell = {}
   for i in range(2, num_nodes):
-    cell[i] = {"L": [random.choices(list(range(i)), k=1)[0],
-                     random.choices(list(range(num_opers)), k=1)[0]],
-               "R": [random.choices(list(range(i)), k=1)[0], 
-                     random.choices(list(range(num_opers)), k=1)[0]]}
+    cell[i] = {"L": {"input_layer":random.choices(list(range(i)), k=1)[0],
+                     "oper_id":random.choices(list(range(num_opers)), k=1)[0]},
+               "R": {"input_layer":random.choices(list(range(i)), k=1)[0], 
+                     "oper_id":random.choices(list(range(num_opers)), k=1)[0]}}
   return cell
-
-
-
 
 def print_gpu_ram(gpu_num):
   gpu = GPU.getGPUs()[gpu_num]

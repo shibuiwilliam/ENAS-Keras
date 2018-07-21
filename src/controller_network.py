@@ -22,7 +22,6 @@ from src.utils import get_size_str
 from src.utils import get_int_list_in_str
 from src.utils import generate_random_cell
 
-
 class ControllerRNNGenerator(object):
   def __init__(self,
                controller_network_name,
@@ -168,10 +167,10 @@ class ControllerRNNManager(object):
     cell_pred = {}
     for p in range(2, self.num_nodes):
       pos = list(range((p-2)*4, ((p-2)*4)+4))
-      cell_pred[p] = {"L" :[np.argmax(controller_pred[pos[0]]), 
-                            np.argmax(controller_pred[pos[2]])],
-                      "R" :[np.argmax(controller_pred[pos[1]]), 
-                            np.argmax(controller_pred[pos[3]])]}
+      cell_pred[p] = {"L" :{"input_layer":np.argmax(controller_pred[pos[0]]), 
+                            "oper_id":np.argmax(controller_pred[pos[2]])},
+                      "R" :{"input_layer":np.argmax(controller_pred[pos[1]]), 
+                            "oper_id":np.argmax(controller_pred[pos[3]])}}
     return cell_pred
   
   def convert_pred_to_ydict(self, controller_pred):
@@ -184,3 +183,5 @@ class ControllerRNNManager(object):
       ydict["{0}_{1}_{2}_{3}".format(name_prefix, "operL", i, "softmax")] = controller_pred[pos[2]]
       ydict["{0}_{1}_{2}_{3}".format(name_prefix, "operR", i, "softmax")] = controller_pred[pos[3]]
     return ydict
+
+

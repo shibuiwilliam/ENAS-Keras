@@ -145,6 +145,7 @@ class NetworkOperation(object):
                    name="{0}_softmax_".format(name_prefix))(x)
     return x
 
+
 class NetworkOperationController(object):
   def __init__(self, 
                network_name,
@@ -165,21 +166,27 @@ class NetworkOperationController(object):
     return (2 ** self.num_reductions) * self.init_filters
   
   def generate_layer_name(self, cell_type, type_num,
-                          node_num, LorR, operation):
+                          node_num, inputs_node_num, LorR, operation):
     """
-    layer_name = {network_name}_{cell_type}_{type_num}_{node_num}_{LorR}_{operation}_{function}_{opt}
+    layer_name = {network_name}_{cell_type}_{type_num}_{node_num}_{node_from}_{LorR}_{operation}_{opt}
+    {cell_type} is either 'normal' or 'reduction'
+    {type_num} is identity for the cell type starting from 0
+    {node_num} is identity for node
+    {node_from} is input node num
     {LorR} is 'L' for Left or 'R' for Right operation; 'C' for add, concat, input and classification layers
-    {function} is added when the layer generated
+    {operation} is added when the layer generated
     {opt} is optional
     """
-    return "{0}_{1}_{2}_{3}_{4}_{5}".format(self.network_name,
-                                            cell_type, type_num,
-                                            node_num, LorR, operation)
+    return "{0}_{1}_{2}_{3}_{4}_{5}_{6}".format(self.network_name,
+                                                cell_type, type_num,
+                                                node_num, inputs_node_num,
+                                                LorR, operation)
   
   def generate_input_layer(self):
     name_prefix = self.generate_layer_name(cell_type="fixed", 
                                            type_num=999, 
-                                           node_num=999, 
+                                           node_num=999,
+                                           inputs_node_num=999,
                                            LorR="C",
                                            operation="input")
     return self.NO.input_layer(input_shape=self.input_shape, 
@@ -189,6 +196,7 @@ class NetworkOperationController(object):
     name_prefix = self.generate_layer_name(cell_type="fixed", 
                                            type_num=999, 
                                            node_num=999, 
+                                           inputs_node_num=999,
                                            LorR="C",
                                            operation="classification")
     return self.NO.classification_layer(inputs=inputs,
@@ -202,7 +210,9 @@ class NetworkOperationController(object):
             3:"avepool3x3",
             4:"identity"}
 
-  def generate_node_operation(self, oper_id, inputs, node_num, LorR, 
+  def generate_node_operation(self,
+                              oper_id, inputs_node_num, inputs, 
+                              node_num, LorR, 
                               reduction=False):
     if reduction:
       strides=(2,2)
@@ -216,6 +226,7 @@ class NetworkOperationController(object):
     name_prefix = self.generate_layer_name(cell_type=cell_type, 
                                            type_num=type_num, 
                                            node_num=node_num, 
+                                           inputs_node_num=inputs_node_num,
                                            LorR=LorR,
                                            operation=self.get_node_operation_dicts()[oper_id])
     if oper_id == 0:
@@ -289,6 +300,7 @@ class NetworkOperationController(object):
     name_prefix = self.generate_layer_name(cell_type=cell_type, 
                                            type_num=type_num, 
                                            node_num=node_num, 
+                                           inputs_node_num=node_num,
                                            LorR="C",
                                            operation="add")
     x_0, x_1 = self.adjust_layer_sizes(x_0, x_1, name_prefix, rep=0)
@@ -308,6 +320,7 @@ class NetworkOperationController(object):
     name_prefix = self.generate_layer_name(cell_type=cell_type, 
                                            type_num=type_num, 
                                            node_num=node_num, 
+                                           inputs_node_num=node_num,
                                            LorR="C",
                                            operation="concat")    
     
@@ -334,6 +347,7 @@ class NetworkOperationController(object):
           smallest_i = i
     return smallest_i
 
+
 class CellGenerator(object):
   def __init__(self,
                num_nodes,
@@ -348,10 +362,10 @@ class CellGenerator(object):
     node_num = operation node in int; starts from 2
     inputs = input node num in int
     oper_id = operation id in int
-    {node_num(int): {L: [inputs(int), oper_id(int)],
-                     R: [inputs(int), oper_id(int)]},
-     node_num(int): {L: [inputs(int), oper_id(int)],
-                     R: [inputs(int), oper_id(int)]} ... }
+    {node_num(int): {L: {input_layer:(int), oper_id:(int)},
+                     R: {input_layer:(int), oper_id:(int)}},
+     node_num(int): {L: {input_layer:(int), oper_id:(int)},
+                     R: {input_layer:(int), oper_id:(int)}} ... }
     """
     
     self.NOC = NetworkOperationControllerInstance
@@ -382,13 +396,14 @@ class CellGenerator(object):
       loose_ends.append(n)
       lr_outputs = {}
       for lr,op in lrop.items():
-        lr_outputs[lr] = self.NOC.generate_node_operation(oper_id=op[1], 
-                                                          inputs=node_output[op[0]], 
+        lr_outputs[lr] = self.NOC.generate_node_operation(oper_id=op["oper_id"], 
+                                                          inputs_node_num=op["input_layer"],
+                                                          inputs=node_output[op["input_layer"]], 
                                                           node_num=n, 
                                                           LorR=lr,
                                                           reduction=reduction)
-        if op[0] in loose_ends:
-          loose_ends.remove(op[0])
+        if op["input_layer"] in loose_ends:
+          loose_ends.remove(op["input_layer"])
       node_output[n] = self.NOC.add_layers(lr_outputs["L"], lr_outputs["R"], 
                                            node_num=n, 
                                            reduction=reduction)
@@ -413,7 +428,10 @@ class ChildNetworkGenerator(object):
                opt=Adam(lr=0.0001, decay=1e-6, amsgrad=True),
                opt_metrics=['accuracy']):
     self.child_network_definition = child_network_definition
-    # child_network_definition: ["N","N","R","N","N","R"]
+    """
+    child_network_definition is like ["N","N","R","N","N","R"] 
+    where N is for normal and R for reduction
+    """
     self.opt_loss = opt_loss
     self.opt = opt
     self.opt_metrics = opt_metrics
@@ -448,9 +466,11 @@ class ChildNetworkGenerator(object):
 
 class ChildNetworkManager(object):
   def __init__(self,
+               weight_dict,
                weight_directory="./"):
     self.model = None
     self.model_dict = None
+    self.weight_dict = weight_dict
     self.weight_directory = self.make_dir(weight_directory)
     
   def set_model(self, model):
@@ -467,6 +487,8 @@ class ChildNetworkManager(object):
     """
     _model_dict = {layer_num(int): {full_name(str): name,
                                     cell_type(str): normal, 
+                                    type_num(str): (int),
+                                    node_from(str): (int),
                                     oper(str): sepconv3x3, 
                                     func(str): relu, 
                                     input_shape(str): [32,32,3](int tuple),
@@ -478,61 +500,75 @@ class ChildNetworkManager(object):
     for l in range(len(self.model.layers)):
       model_name = self.model.layers[l].name.split("_")
       _model_dict[l] = {"full_name": self.model.layers[l].name,
-                        "cell_type": model_name[1],
-                        "oper": model_name[5],
-                        "func": model_name[6],
+                        "cell_type": model_name[2],
+                        "type_num": model_name[3],
+                        "node_from": model_name[4],
+                        "oper": model_name[6],
+                        "func": model_name[7],
                         "input_shape": self.model.layers[l].input_shape,
                         "output_shape": self.model.layers[l].output_shape,
                         "param": self.model.layers[l].count_params()
                         }
     return _model_dict
     
-  def save_layer_weight(self):
+  def set_layer_weight(self, save_to_disk=False):
     """
-    weight_name = {operation}_{func}_{input HxWxD}_{output HxWxD}_{param}.joblib if sepconv
-                  else {func}_{input HxWxD}_{output HxWxD}_{param}.joblib 
+    weight_name = {operation}_{func}_{cell_type}_{type_num}_{node_from}_{input HxWxD}_{output HxWxD}_{param} if sepconv
+                  else {func}_{cell_type}_{type_num}_{node_from}_{input HxWxD}_{output HxWxD}_{param} 
     """
-    weight_dict = {}
+    _weight_dict = {}
     for l,d in self.model_dict.items():
       if d["param"] > 0:
         weight_name = self.generate_weight_name(d)
-        print("saving weight: {0}".format(weight_name))  
-        if weight_name not in weight_dict:
-          weight_dict[weight_name] = [self.model.layers[l].get_weights(), 1]
+        print("setting weight: {0}".format(weight_name))  
+        if weight_name not in _weight_dict:
+          _weight_dict[weight_name] = [self.model.layers[l].get_weights(), 1]
         else:
-          weight_dict[weight_name][0] = [weight_dict[weight_name][0][i] + self.model.layers[l].get_weights()[i] for i in range(len(weight_dict[weight_name][0]))]
-          weight_dict[weight_name][1] += 1
+          _weight_dict[weight_name][0] = [_weight_dict[weight_name][0][i] + self.model.layers[l].get_weights()[i] for i in range(len(_weight_dict[weight_name][0]))]
+          _weight_dict[weight_name][1] += 1
           
-    for wn, wl in weight_dict.items():
+    for wn, wl in _weight_dict.items():
       w = [wl[0][i]/wl[1] for i in range(len(wl[0]))]
-      joblib.dump(w, 
-                  os.path.join(self.weight_directory, wn))
+      self.weight_dict[wn] = w
+      if save_to_disk:
+        joblib.dump(w, 
+                    os.path.join(self.weight_directory, "{0}.joblib".format(wn)))
       
   def generate_weight_name(self, d):
     if d["func"] == "sepconv2d":
-      return "{0}_{1}_{2}_{3}_{4}.joblib".format(d["oper"],
-                                                 d["func"],
-                                                 get_int_list_in_str(d["input_shape"][1:]),
-                                                 get_int_list_in_str(d["output_shape"][1:]),
-                                                 d["param"])
+      return "{0}_{1}_{2}_{3}_{4}_{5}_{6}_{7}".format(d["oper"],
+                                                  d["func"],
+                                                  d["cell_type"],
+                                                  d["type_num"],
+                                                  d["node_from"],
+                                                  get_int_list_in_str(d["input_shape"][1:]),
+                                                  get_int_list_in_str(d["output_shape"][1:]),
+                                                  d["param"])
     else:
-      return "{0}_{1}_{2}_{3}.joblib".format(d["func"],
-                                             get_int_list_in_str(d["input_shape"][1:]),
-                                             get_int_list_in_str(d["output_shape"][1:]),
-                                             d["param"])
+      return "{0}_{1}_{2}_{3}_{4}_{5}_{6}".format(d["func"],
+                                              d["cell_type"],
+                                              d["type_num"],
+                                              d["node_from"],
+                                              get_int_list_in_str(d["input_shape"][1:]),
+                                              get_int_list_in_str(d["output_shape"][1:]),
+                                              d["param"])
     
   def load_weight_file(self, file_name):
     return joblib.load(os.path.join(self.weight_directory, file_name)) 
   
-  def set_weight_to_layer(self):
+  def set_weight_to_layer(self, set_from_dict=True):
     file_list = self.get_weight_file_list()
     for l,d in self.model_dict.items():
       if d["param"] > 0:
         weight_name = self.generate_weight_name(d)
-        if weight_name in file_list:
-          print("loading weight: {0}".format(weight_name))
-          w = self.load_weight_file(weight_name)
-          self.model.layers[l].set_weights(w)
+        if set_from_dict:
+          if weight_name in self.weight_dict:
+            print("loading weight: {0}".format(weight_name))
+            self.model.layers[l].set_weights(self.weight_dict[weight_name])  
+        else:
+          if weight_name in file_list:
+            print("loading weight: {0}".format(weight_name))
+            self.model.layers[l].set_weights(self.load_weight_file(weight_name))
   
   def get_weight_file_list(self):
     return os.listdir(self.weight_directory)
@@ -565,8 +601,5 @@ class ChildNetworkManager(object):
   def evaluate_child_network(self, 
                              x_test, y_test):
     return self.model.evaluate(x_test, y_test)
-
-
-
 
 
