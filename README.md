@@ -15,20 +15,25 @@ Keras implementation of [Efficient Neural Architecture Search](https://arxiv.org
 - GPU
 
 # Micro search
-Run either ENAS_Keras.py or ENAS_Keras.ipynb on Jupyter Notebook to micro search CNN cells using [Cifar10](https://www.cs.toronto.edu/~kriz/cifar.html).
+Run either ENAS_Keras_CIFAR10.py or ENAS_Keras_CIFAR10.ipynb on Jupyter Notebook to micro search CNN cells using [Cifar10](https://www.cs.toronto.edu/~kriz/cifar.html) dataset.
+Run either ENAS_Keras_MNIST.py or ENAS_Keras_MNIST.ipynb on Jupyter Notebook to micro search CNN cells using MNIST dataset.
 
 # Files
 
 ```
 .
-├── ENAS_Keras.ipynb
-├── ENAS_Keras.py
-├── src
-│   ├── child_network_micro_search.py
-│   ├── controller_network.py
-│   ├── __init__.py
-│   ├── keras_utils.py
-└── └── utils.py
+├── ENAS_Keras_CIFAR10.ipynb
+├── ENAS_Keras_CIFAR10.py
+├── ENAS_Keras_MNIST.ipynb
+├── ENAS_Keras_MNIST.py
+├── ENAS.py
+├── __init__.py
+└── src
+    ├── child_network_micro_search.py
+    ├── controller_network.py
+    ├── __init__.py
+    ├── keras_utils.py
+    └── utils.py
 ```
 
 # Other implementations
