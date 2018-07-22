@@ -153,7 +153,7 @@ class NetworkOperationController(object):
                input_shape,
                init_filters,
                NetworkOperationInstance):
-    self.network_name = network_name
+    self.network_name = network_name.replace("_","-")
     self.classes = classes
     self.input_shape = input_shape
     self.init_filters = init_filters
@@ -488,6 +488,7 @@ class ChildNetworkManager(object):
     _model_dict = {layer_num(int): {full_name(str): name,
                                     cell_type(str): normal, 
                                     type_num(str): (int),
+                                    node_num(str): (int),
                                     node_from(str): (int),
                                     oper(str): sepconv3x3, 
                                     func(str): relu, 
@@ -500,8 +501,9 @@ class ChildNetworkManager(object):
     for l in range(len(self.model.layers)):
       model_name = self.model.layers[l].name.split("_")
       _model_dict[l] = {"full_name": self.model.layers[l].name,
-                        "cell_type": model_name[2],
-                        "type_num": model_name[3],
+                        "cell_type": model_name[1],
+                        "type_num": model_name[2],
+                        "node_num": model_name[3],
                         "node_from": model_name[4],
                         "oper": model_name[6],
                         "func": model_name[7],
@@ -512,12 +514,10 @@ class ChildNetworkManager(object):
     return _model_dict
     
   def set_layer_weight(self, save_to_disk=False):
-    """
-    weight_name = {operation}_{func}_{cell_type}_{type_num}_{node_from}_{input HxWxD}_{output HxWxD}_{param} if sepconv
-                  else {func}_{cell_type}_{type_num}_{node_from}_{input HxWxD}_{output HxWxD}_{param} 
-    """
     _weight_dict = {}
     for l,d in self.model_dict.items():
+      if d["func"] == "bn":
+        continue
       if d["param"] > 0:
         weight_name = self.generate_weight_name(d)
         print("setting weight: {0}".format(weight_name))  
@@ -535,19 +535,26 @@ class ChildNetworkManager(object):
                     os.path.join(self.weight_directory, "{0}.joblib".format(wn)))
       
   def generate_weight_name(self, d):
+    """
+    weight_name = 
+    {operation}_{func}_{cell_type}_{type_num}_{node_num}_{node_from}_{input HxWxD}_{output HxWxD}_{param} if sepconv
+    else {func}_{cell_type}_{type_num}_{node_num}_{node_from}_{input HxWxD}_{output HxWxD}_{param} 
+    """
     if d["func"] == "sepconv2d":
-      return "{0}_{1}_{2}_{3}_{4}_{5}_{6}_{7}".format(d["oper"],
+      return "{0}_{1}_{2}_{3}_{4}_{5}_{6}_{7}_{8}".format(d["oper"],
                                                   d["func"],
                                                   d["cell_type"],
                                                   d["type_num"],
+                                                  d["node_num"],
                                                   d["node_from"],
                                                   get_int_list_in_str(d["input_shape"][1:]),
                                                   get_int_list_in_str(d["output_shape"][1:]),
                                                   d["param"])
     else:
-      return "{0}_{1}_{2}_{3}_{4}_{5}_{6}".format(d["func"],
+      return "{0}_{1}_{2}_{3}_{4}_{5}_{6}_{7}".format(d["func"],
                                               d["cell_type"],
                                               d["type_num"],
+                                              d["node_num"],
                                               d["node_from"],
                                               get_int_list_in_str(d["input_shape"][1:]),
                                               get_int_list_in_str(d["output_shape"][1:]),
@@ -559,6 +566,8 @@ class ChildNetworkManager(object):
   def set_weight_to_layer(self, set_from_dict=True):
     file_list = self.get_weight_file_list()
     for l,d in self.model_dict.items():
+      if d["func"] == "bn":
+        continue
       if d["param"] > 0:
         weight_name = self.generate_weight_name(d)
         if set_from_dict:
@@ -575,7 +584,7 @@ class ChildNetworkManager(object):
   
   def train_child_network(self,
                           x_train, y_train,
-                          validation_data,
+                          validation_data=[],
                           batch_size = 32,
                           epochs = 10,
                           callbacks=[EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='auto')],

@@ -87,12 +87,13 @@ class EfficientNeuralArchitectureSearch(object):
         self.child_opt_loss=child_opt_loss
         self.child_opt=child_opt
         self.child_opt_metrics=child_opt_metrics
-        self.child_val_batch_size = child_val_batch_size
         self.child_batch_size = child_batch_size
         self.child_epochs = child_epochs
         self.child_callbacks = child_callbacks
         self.child_train_records = []
-        self.child_val_index = self.get_child_val_index(self.y_test)
+        self.child_val_batch_size = child_val_batch_size
+        self.child_train_index = self.get_child_index(self.y_train)
+        self.child_val_index = self.get_child_index(self.y_test)
         
         self.run_on_jupyter = run_on_jupyter
         self.save_to_disk=save_to_disk
@@ -117,7 +118,7 @@ class EfficientNeuralArchitectureSearch(object):
             if os.path.exists(self.child_weight_directory):
                 shutil.rmtree(self.child_weight_directory)
         
-    def get_child_val_index(self, y):
+    def get_child_index(self, y):
         return [i for i in range(len(y))]
     
     def define_controller_rnn(self, controller_network_name):
@@ -154,6 +155,11 @@ class EfficientNeuralArchitectureSearch(object):
             sample_cell["reduction_cell"] = self.RCRM.convert_pred_to_cell(random_reduction_pred)
             sample_cells.append(sample_cell)
 
+#           train_batch = np.random.choice(self.child_train_index,
+#                                          self.child_val_batch_size*5, 
+#                                          replace=False)
+#           x_train_batch = self.x_train[train_batch]
+#           y_train_batch = self.y_train[train_batch]
           val_batch = np.random.choice(self.child_val_index,
                                        self.child_val_batch_size, 
                                        replace=False)
@@ -187,6 +193,11 @@ class EfficientNeuralArchitectureSearch(object):
                                       weight_directory=self.child_weight_directory)
             CNM.set_model(CNG.generate_child_network())    
             CNM.set_weight_to_layer(set_from_dict=self.set_from_dict)
+#             CNM.train_child_network(x_train=x_train_batch, y_train=y_train_batch,
+#                                     batch_size = self.child_batch_size,
+#                                     epochs = 1,
+#                                     callbacks=None,
+#                                     data_gen=self.data_gen)
             val_acc = CNM.evaluate_child_network(x_val_batch, y_val_batch)
             print(val_acc)
             if best_val_acc < val_acc[1]:
