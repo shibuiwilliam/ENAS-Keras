@@ -21,38 +21,7 @@ from keras.callbacks import EarlyStopping
 import tensorflow as tf
 
 
-# In[ ]:
-
-
-from src.child_network_micro_search import NetworkOperation
-from src.child_network_micro_search import NetworkOperationController
-from src.child_network_micro_search import CellGenerator
-from src.child_network_micro_search import ChildNetworkGenerator
-from src.child_network_micro_search import ChildNetworkManager
-
-from src.controller_network import ControllerRNNGenerator
-from src.controller_network import ControllerRNNManager
-
 from ENAS import EfficientNeuralArchitectureSearch
-
-
-# In[ ]:
-
-
-# Set GPU option to allow_growth=False
-
-
-# In[ ]:
-
-
-config = tf.ConfigProto(
-    gpu_options=tf.GPUOptions(
-        allow_growth=False,
-        per_process_gpu_memory_fraction=0.3
-    )
-)
-sess = tf.Session(config=config)
-K.set_session(sess)
 
 
 # In[ ]:
@@ -118,7 +87,7 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                sample_nums = 5,
                                controller_lstm_cell_units = 32,
                                controller_baseline_decay = 0.99,
-                               controller_opt = Adam(lr=0.0001, decay=1e-6, amsgrad=True),
+                               controller_opt = Adam(lr=0.00035, decay=1e-3, amsgrad=True),
                                controller_batch_size = 1,
                                controller_epochs = 50,
                                controller_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto')],
@@ -128,7 +97,7 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                child_network_definition=["N","R"],
                                child_weight_directory="./mnist_weights",
                                child_opt_loss='categorical_crossentropy',
-                               child_opt=Adam(lr=0.0001, decay=1e-6, amsgrad=True),
+                               child_opt=SGD(lr=0.001, decay=1e-6, nesterov=True),
                                child_opt_metrics=['accuracy'],
                                child_val_batch_size = 256,
                                child_batch_size = 32,

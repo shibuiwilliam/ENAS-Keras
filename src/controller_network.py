@@ -12,6 +12,7 @@ from keras.layers import Input, Dense, Dropout, Activation, BatchNormalization
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping
 from keras import losses, metrics
+from keras.models import load_model
 
 import tensorflow as tf
 
@@ -22,22 +23,36 @@ from src.utils import get_size_str
 from src.utils import get_int_list_in_str
 from src.utils import generate_random_cell
 
-class ControllerRNNGenerator(object):
+class ControllerRNNController(object):
   def __init__(self,
                controller_network_name,
                num_nodes,
                num_opers,
+               input_x,
+               reward = 0,
+               temperature = 5.0,
+               tanh_constant = 2.5,
+               model_file = None,
                lstm_cell_units=32,
                baseline_decay=0.999,
                opt=Adam(lr=0.00035, decay=1e-3, amsgrad=True)):
+
     self.controller_network_name = controller_network_name
     self.num_nodes = num_nodes
     self.num_opers = num_opers
+    self.reward = reward
+    self.input_x = input_x
+    self.temperature = temperature
+    self.tanh_constant = tanh_constant
     self.lstm_cell_units = lstm_cell_units
     self.opt = opt
+    self.model_file = model_file
+    
     self.controller_rnn = self.generate_controller_rnn()
     self.baseline = None
-    self.baseline_decay = baseline_decay    
+    self.baseline_decay = baseline_decay
+    
+    self.graph = tf.get_default_graph()
     
   def lstm_reshape(self, inputs, name_prefix, index, 
                    reshaped_inputs=None, initial=False):
@@ -78,12 +93,12 @@ class ControllerRNNGenerator(object):
           _x, _rx, _initial = controller_input, None, True
         else:
           _x, _rx, _initial = x, rx, False
-        
+
         if o in ["inputL", "inputR"]:
           _num_classes = i
         else:
           _num_classes = self.num_opers
-          
+
         x, rx = self.lstm_reshape(inputs=_x, name_prefix=o, index=i, 
                                   reshaped_inputs=_rx, 
                                   initial=_initial)
@@ -93,15 +108,18 @@ class ControllerRNNGenerator(object):
 
     controller_rnn = Model(inputs=controller_input,
                            outputs=outputs)
+    
+    if self.model_file is not None:
+        controller_rnn.load_weights(self.model_file)
     return controller_rnn
     
-  def compile_controller_rnn(self, reward):
+  def compile_controller_rnn(self):
     def _controller_loss(y_true, y_pred):
       if self.baseline is None:
         self.baseline = 0
       else:
-        baseline = (1 - self.baseline_decay) * (self.baseline - reward)
-      return y_pred * (reward - self.baseline)
+        baseline = (1 - self.baseline_decay) * (self.baseline - self.reward)
+      return y_pred * (self.reward - self.baseline)
     
     def _define_loss(controller_loss):
       outputs_loss = {}
@@ -118,40 +136,26 @@ class ControllerRNNGenerator(object):
     
     self.controller_rnn.compile(loss=_define_loss(_controller_loss),
                                 optimizer=self.opt)
-
-
-class ControllerRNNManager(object):
-  def __init__(self,
-               controller_rnn_instance,
-               input_x,
-               reward = 0,
-               temperature = 5.0,
-               tanh_constant = 2.5):
-    self.CR = controller_rnn_instance
-    self.controller_rnn = self.CR.controller_rnn
-    self.reward = reward
-    self.input_x = input_x
-    self.num_nodes = self.CR.num_nodes
-    self.temperature = temperature
-    self.tanh_constant = tanh_constant
-  
-  def compile_with_newest_reward(self):
-    self.CR.compile_controller_rnn(self.reward)
     
+  def save_model(self):
+    self.controller_rnn.save(self.model_file)
+
   def train_controller_rnn(self,
                            targets,
                            batch_size = 1,
                            epochs = 50,
                            callbacks=[EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='auto')]):
-    self.compile_with_newest_reward()
-    self.controller_rnn.fit(self.input_x, targets,
-                            epochs=epochs,
-                            batch_size=batch_size,
-                            verbose=0)    
+    with self.graph.as_default():
+        self.compile_controller_rnn()
+        self.controller_rnn.fit(self.input_x, targets,
+                                epochs=epochs,
+                                batch_size=batch_size,
+                                verbose=0)    
     
   def softmax_predict(self):
-    self.compile_with_newest_reward()
-    return self.controller_rnn.predict(self.input_x)
+    with self.graph.as_default():
+        self.compile_controller_rnn()
+        return self.controller_rnn.predict(self.input_x)
     
   def random_sample_softmax(self, controller_pred):
     sample_softmax = []
@@ -175,7 +179,7 @@ class ControllerRNNManager(object):
   
   def convert_pred_to_ydict(self, controller_pred):
     ydict = {}
-    name_prefix = self.CR.controller_network_name
+    name_prefix = self.controller_network_name
     for i in range(2, self.num_nodes):
       pos = list(range((i-2)*4, ((i-2)*4)+4))
       ydict["{0}_{1}_{2}_{3}".format(name_prefix, "inputL", i, "softmax")] = controller_pred[pos[0]] 

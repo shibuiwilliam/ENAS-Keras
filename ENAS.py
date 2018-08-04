@@ -8,7 +8,7 @@ from copy import deepcopy
 import keras
 from keras import backend as K
 from keras.utils import to_categorical
-from keras.optimizers import Adam
+from keras.optimizers import Adam, SGD
 from keras.callbacks import EarlyStopping
 
 import tensorflow as tf
@@ -16,11 +16,9 @@ import tensorflow as tf
 from src.child_network_micro_search import NetworkOperation
 from src.child_network_micro_search import NetworkOperationController
 from src.child_network_micro_search import CellGenerator
-from src.child_network_micro_search import ChildNetworkGenerator
-from src.child_network_micro_search import ChildNetworkManager
+from src.child_network_micro_search import ChildNetworkController
 
-from src.controller_network import ControllerRNNGenerator
-from src.controller_network import ControllerRNNManager
+from src.controller_network import ControllerRNNController
 
 
 class EfficientNeuralArchitectureSearch(object):
@@ -38,7 +36,7 @@ class EfficientNeuralArchitectureSearch(object):
                  sample_nums = 5,
                  controller_lstm_cell_units = 32,
                  controller_baseline_decay = 0.99,
-                 controller_opt = Adam(lr=0.0001, decay=1e-6, amsgrad=True),
+                 controller_opt = Adam(lr=0.00035, decay=1e-3, amsgrad=True),
                  controller_batch_size = 1,
                  controller_epochs = 50,
                  controller_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto')],
@@ -48,7 +46,7 @@ class EfficientNeuralArchitectureSearch(object):
                  child_network_definition=["N","N","R"],
                  child_weight_directory="./weights",
                  child_opt_loss='categorical_crossentropy',
-                 child_opt=Adam(lr=0.0001, decay=1e-6, amsgrad=True),
+                 child_opt=SGD(lr=0.001, decay=1e-6, nesterov=True),
                  child_opt_metrics=['accuracy'],
                  child_val_batch_size = 256,
                  child_batch_size = 32,
@@ -103,9 +101,9 @@ class EfficientNeuralArchitectureSearch(object):
         
         self.reward = 0
         
-        self.NCR, self.NCRM = self.define_controller_rnn(controller_network_name="normalcontroller")
-        self.RCR, self.RCRM = self.define_controller_rnn(controller_network_name="reductioncontroller")
-        
+        self.NCRC = self.define_controller_rnn(controller_network_name="normalcontroller")
+        self.RCRC = self.define_controller_rnn(controller_network_name="reductioncontroller")
+      
         self.weight_dict = {}
         
         self._sep = "-"*10
@@ -122,49 +120,108 @@ class EfficientNeuralArchitectureSearch(object):
         return [i for i in range(len(y))]
     
     def define_controller_rnn(self, controller_network_name):
-        CR = ControllerRNNGenerator(controller_network_name=controller_network_name,
+        return ControllerRNNController(controller_network_name=controller_network_name,
                                      num_nodes=self.num_nodes,
                                      num_opers=self.num_opers,
+                                     input_x = self.controller_input_x,
+                                     reward = self.reward,
+                                     temperature = self.controller_temperature,
+                                     tanh_constant = self.controller_tanh_constant,
+                                     model_file = None,
                                      lstm_cell_units=self.controller_lstm_cell_units,
                                      baseline_decay=self.controller_baseline_decay,
                                      opt=self.controller_opt)
-        CRM = ControllerRNNManager(controller_rnn_instance = CR,
-                                    input_x = self.controller_input_x,
-                                    reward = self.reward,
-                                    temperature = self.controller_temperature,
-                                    tanh_constant = self.controller_tanh_constant)
-        return CR, CRM
+    
+    def train_controller_rnn(self, normal_pred_dict, reduction_pred_dict):        
+          self.NCRC.reward = self.reward
+          self.RCRC.reward = self.reward
+          print("{0} training {1} {0}".format(self._sep, self.NCRC.controller_network_name))
+          self.NCRC.train_controller_rnn(targets=normal_pred_dict,
+                                         batch_size = self.controller_batch_size,
+                                         epochs = self.controller_epochs,
+                                         callbacks=self.controller_callbacks)
+          print("{0} training {1} {0}".format(self._sep, self.RCRC.controller_network_name))
+          self.RCRC.train_controller_rnn(targets=reduction_pred_dict,
+                                         batch_size = self.controller_batch_size,
+                                         epochs = self.controller_epochs,
+                                         callbacks=self.controller_callbacks)
+        
+    def define_network_operations(self):
+        return NetworkOperationController(network_name=self.child_network_name,
+                                         classes=self.child_classes,
+                                         input_shape=self.child_input_shape,
+                                         init_filters=self.child_init_filters,
+                                         NetworkOperationInstance=NetworkOperation())
+    
+    def generate_child_cell(self, normal_cell, reduction_cell, NOC):
+        return CellGenerator(num_nodes=self.num_nodes,                   
+                           normal_cell=normal_cell,
+                           reduction_cell=reduction_cell,
+                           NetworkOperationControllerInstance=NOC)
+        
+    def define_chile_network(self, CG):
+        return ChildNetworkController(child_network_definition=self.child_network_definition,
+                                   CellGeneratorInstance=CG,
+                                   weight_dict=self.weight_dict, 
+                                   weight_directory=self.child_weight_directory,
+                                   opt_loss=self.child_opt_loss,
+                                   opt=self.child_opt,
+                                   opt_metrics=self.child_opt_metrics)
+    
+    def predict_architecture(self, CRC):
+        controller_pred = CRC.softmax_predict()
+        pred_dict = CRC.convert_pred_to_ydict(controller_pred)
+        return controller_pred, pred_dict
+    
+    def get_sample_cells(self, normal_controller_pred, reduction_controller_pred):
+        sample_cells = []
+        for _ in range(self.sample_nums):
+          sample_cell = {}
+          random_normal_pred = self.NCRC.random_sample_softmax(normal_controller_pred)
+          random_reduction_pred = self.RCRC.random_sample_softmax(reduction_controller_pred)
+
+          sample_cell["normal_cell"] = self.NCRC.convert_pred_to_cell(random_normal_pred)
+          sample_cell["reduction_cell"] = self.RCRC.convert_pred_to_cell(random_reduction_pred)
+          sample_cells.append(sample_cell)
+        return sample_cells
+    
+    
+    def final_output(self, CNC, val_acc):
+        if self.run_on_jupyter: 
+            from IPython.display import clear_output
+            clear_output(wait=True)
+        print("{0} FINISHED NEURAL ARCHITECTURE SEARCH {0}".format(self._sep))
+        print("training records:\n{0}".format(self.child_train_records))
+        print("final child network:\n")
+        print(CNC.model.summary())
+        print("evaluation loss: {0}\nevaluation acc: {1}".format(val_acc[0],
+                                                                 val_acc[1]))
+    def get_batch(self, index, size, train=True):
+        _batch = np.random.choice(index,
+                                  size, 
+                                  replace=False)
+        if train:
+             return self.x_train[_batch], self.y_train[_batch]
+        else:
+             return self.x_test[_batch], self.y_test[_batch]
+        
     
     def search_neural_architecture(self):
         for e in range(self.search_epochs):
           print("SEARCH EPOCH: {0} / {1}".format(e, self.search_epochs))
           print("{0} sampling cells {0}".format(self._sep))
-          normal_controller_pred = self.NCRM.softmax_predict()
-          reduction_controller_pred = self.RCRM.softmax_predict()
+          normal_controller_pred, normal_pred_dict = self.predict_architecture(self.NCRC)
+          reduction_controller_pred, reduction_pred_dict = self.predict_architecture(self.RCRC)
+            
+          sample_cells = self.get_sample_cells(normal_controller_pred, reduction_controller_pred)
 
-          normal_pred_dict = self.NCRM.convert_pred_to_ydict(normal_controller_pred)
-          reduction_pred_dict = self.RCRM.convert_pred_to_ydict(reduction_controller_pred)
-
-          sample_cells = []
-          for _ in range(self.sample_nums):
-            sample_cell = {}
-            random_normal_pred = self.NCRM.random_sample_softmax(normal_controller_pred)
-            random_reduction_pred = self.RCRM.random_sample_softmax(reduction_controller_pred)
-
-            sample_cell["normal_cell"] = self.NCRM.convert_pred_to_cell(random_normal_pred)
-            sample_cell["reduction_cell"] = self.RCRM.convert_pred_to_cell(random_reduction_pred)
-            sample_cells.append(sample_cell)
-
-#           train_batch = np.random.choice(self.child_train_index,
-#                                          self.child_val_batch_size*5, 
-#                                          replace=False)
-#           x_train_batch = self.x_train[train_batch]
-#           y_train_batch = self.y_train[train_batch]
-          val_batch = np.random.choice(self.child_val_index,
-                                       self.child_val_batch_size, 
-                                       replace=False)
-          x_val_batch = self.x_test[val_batch]
-          y_val_batch = self.y_test[val_batch]
+          x_train_batch, y_train_batch = self.get_batch(self.child_train_index,
+                                                        self.child_val_batch_size*5,
+                                                        True)
+          x_val_batch, y_val_batch = self.get_batch(self.child_val_index,
+                                                    self.child_val_batch_size,
+                                                    False)
+        
           best_val_acc = 0
           best_cell_index = 0
 
@@ -173,87 +230,53 @@ class EfficientNeuralArchitectureSearch(object):
                                                                   i))
             for k,v in sample_cells[i].items():
               print("{0}: {1}".format(k,v))
-            NO = NetworkOperation()
-            NOC = NetworkOperationController(network_name=self.child_network_name,
-                                             classes=self.child_classes,
-                                             input_shape=self.child_input_shape,
-                                             init_filters=self.child_init_filters,
-                                             NetworkOperationInstance=NO)
-            CG = CellGenerator(num_nodes=self.num_nodes,                   
-                               normal_cell=sample_cells[i]["normal_cell"],
-                               reduction_cell=sample_cells[i]["reduction_cell"],
-                               NetworkOperationControllerInstance=NOC)
-            CNG = ChildNetworkGenerator(child_network_definition=self.child_network_definition,
-                                        CellGeneratorInstance=CG,
-                                        opt_loss=self.child_opt_loss,
-                                        opt=self.child_opt,
-                                        opt_metrics=self.child_opt_metrics)
-
-            CNM = ChildNetworkManager(weight_dict=self.weight_dict, 
-                                      weight_directory=self.child_weight_directory)
-            CNM.set_model(CNG.generate_child_network())    
-            CNM.set_weight_to_layer(set_from_dict=self.set_from_dict)
-#             CNM.train_child_network(x_train=x_train_batch, y_train=y_train_batch,
-#                                     batch_size = self.child_batch_size,
-#                                     epochs = 1,
-#                                     callbacks=None,
-#                                     data_gen=self.data_gen)
-            val_acc = CNM.evaluate_child_network(x_val_batch, y_val_batch)
+            CG = self.generate_child_cell(sample_cells[i]["normal_cell"],
+                                          sample_cells[i]["reduction_cell"],
+                                          self.define_network_operations())
+            CNC = self.define_chile_network(CG)
+            CNC.set_weight_to_layer(set_from_dict=self.set_from_dict)
+            CNC.train_child_network(x_train=x_train_batch, y_train=y_train_batch,
+                                    batch_size = self.child_batch_size,
+                                    epochs = 1,
+                                    callbacks=None,
+                                    data_gen=self.data_gen)
+            val_acc = CNC.evaluate_child_network(x_val_batch, y_val_batch)
+            CNC.close_tf_session()
+            del CNC.model
+            del CNC
+            del CG
+            
             print(val_acc)
             if best_val_acc < val_acc[1]:
               best_val_acc = val_acc[1]
               best_cell_index = i
-            del CNM.model
-            del CNM.weight_dict
-            del CNM
-            del CNG
-            del CG
-            del NOC
-            del NO
-            for j in range(30):
-              gc.collect()
 
           print("best val accuracy: {0}\nthe current best cell:".format(best_val_acc))
           for k,v in sample_cells[best_cell_index].items():
             print("{0}: {1}".format(k,v))
           print("{0} train child network with the current best cell {0}".format(self._sep))
+        
+          CG = self.generate_child_cell(sample_cells[best_cell_index]["normal_cell"],
+                                        sample_cells[best_cell_index]["reduction_cell"],
+                                        self.define_network_operations())
+          CNC = self.define_chile_network(CG)
 
-          NO = NetworkOperation()
-          NOC = NetworkOperationController(network_name=self.child_network_name,
-                                           classes=self.child_classes,
-                                           input_shape=self.child_input_shape,
-                                           init_filters=self.child_init_filters,
-                                           NetworkOperationInstance=NO)
-
-          CG = CellGenerator(num_nodes=self.num_nodes,                   
-                             normal_cell=sample_cells[best_cell_index]["normal_cell"],
-                             reduction_cell=sample_cells[best_cell_index]["reduction_cell"],
-                             NetworkOperationControllerInstance=NOC)
-          CNG = ChildNetworkGenerator(child_network_definition=self.child_network_definition,
-                                      CellGeneratorInstance=CG,
-                                      opt_loss=self.child_opt_loss,
-                                      opt=self.child_opt,
-                                      opt_metrics=self.child_opt_metrics)
-
-          CNM = ChildNetworkManager(weight_dict=self.weight_dict, 
-                                    weight_directory=self.child_weight_directory)
-          CNM.set_model(CNG.generate_child_network())
           print("MODEL SUMMARY:\n")
-          print(CNM.model.summary())
-          CNM.set_weight_to_layer(set_from_dict=self.set_from_dict)
-          CNM.train_child_network(x_train=self.x_train, y_train=self.y_train,
+          print(CNC.model.summary())
+          CNC.set_weight_to_layer(set_from_dict=self.set_from_dict)
+          CNC.train_child_network(x_train=self.x_train, y_train=self.y_train,
                                   validation_data=(self.x_test, self.y_test),
                                   batch_size = self.child_batch_size,
                                   epochs = self.child_epochs,
                                   callbacks=self.child_callbacks,
                                   data_gen=self.data_gen)
-          CNM.set_layer_weight(save_to_disk=self.save_to_disk)
-          for k,v in CNM.weight_dict.items():
+          CNC.fetch_layer_weight(save_to_disk=self.save_to_disk)
+          for k,v in CNC.weight_dict.items():
               self.weight_dict[k] = v
-#          self.weight_dict = deepcopy(CNM.weight_dict)
           print("{0} training finished {0}".format(self._sep))
 
-          val_acc = CNM.evaluate_child_network(self.x_test, self.y_test)
+          val_acc = CNC.evaluate_child_network(self.x_test, self.y_test)
+
           self.reward = val_acc[1]
           print("evaluation loss: {0}\nevaluation acc: {1}".format(val_acc[0],
                                                                    val_acc[1]))
@@ -269,42 +292,17 @@ class EfficientNeuralArchitectureSearch(object):
           self.child_train_records.append(child_train_record)
 
           if e == self.search_epochs - 1:
-            if self.run_on_jupyter: 
-                from IPython.display import clear_output
-                clear_output(wait=True)
-            print("{0} FINISHED NEURAL ARCHITECTURE SEARCH {0}".format(self._sep))
-            print("training records:\n{0}".format(self.child_train_records))
-            print("final child network:\n")
-            print(CNM.model.summary())
-            print("evaluation loss: {0}\nevaluation acc: {1}".format(val_acc[0],
-                                                                     val_acc[1]))
+            self.final_output(CNC, val_acc)
             break
-
-          del CNM.model
-          del CNM.weight_dict
-          del CNM
-          del CNG
+            
+          CNC.close_tf_session()
+          del CNC.model
+          del CNC
           del CG
-          del NOC
-          del NO
-          for j in range(30):
-            gc.collect()
-
-
+            
           print("{0} train controller rnn {0}".format(self._sep))
+          self.train_controller_rnn(normal_pred_dict, reduction_pred_dict)
 
-          self.NCRM.reward = self.reward
-          self.RCRM.reward = self.reward
-          print("{0} training {1} {0}".format(self._sep, self.NCR.controller_network_name))
-          self.NCRM.train_controller_rnn(targets=normal_pred_dict,
-                                         batch_size = self.controller_batch_size,
-                                         epochs = self.controller_epochs,
-                                         callbacks=self.controller_callbacks)
-          print("{0} training {1} {0}".format(self._sep, self.RCR.controller_network_name))
-          self.RCRM.train_controller_rnn(targets=reduction_pred_dict,
-                                         batch_size = self.controller_batch_size,
-                                         epochs = self.controller_epochs,
-                                         callbacks=self.controller_callbacks)
           print("{0} training finished {0}".format(self._sep))
           print("{0} FINISHED SEARCH EPOCH {1} / {2} {0}".format(self._sep,
                                                                  e, 

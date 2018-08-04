@@ -12,7 +12,7 @@ from keras import Model
 from keras.layers import Add, Concatenate, Reshape
 from keras.layers import Input, Dense, Dropout, Activation, BatchNormalization, ZeroPadding2D, Cropping2D
 from keras.layers import Conv2D, SeparableConv2D, MaxPooling2D, AveragePooling2D, GlobalAveragePooling2D
-from keras.optimizers import Adam
+from keras.optimizers import Adam, SGD
 from keras.callbacks import EarlyStopping
 from keras import losses, metrics
 
@@ -24,6 +24,7 @@ from src.utils import get_random_str
 from src.utils import get_size_str
 from src.utils import get_int_list_in_str
 from src.utils import generate_random_cell
+from src.utils import make_dir
 
 
 class NetworkOperation(object):
@@ -420,23 +421,35 @@ class CellGenerator(object):
                                     reduction=reduction)
 
 
-class ChildNetworkGenerator(object):
+class ChildNetworkController(object):
   def __init__(self, 
                child_network_definition,
                CellGeneratorInstance,
+               weight_dict,
+               weight_directory="./",
                opt_loss='categorical_crossentropy',
-               opt=Adam(lr=0.0001, decay=1e-6, amsgrad=True),
+               opt=SGD(lr=0.001, decay=1e-6, nesterov=True),
                opt_metrics=['accuracy']):
+    
     self.child_network_definition = child_network_definition
     """
     child_network_definition is like ["N","N","R","N","N","R"] 
     where N is for normal and R for reduction
     """
+    
+    self.CG = CellGeneratorInstance
+    
     self.opt_loss = opt_loss
     self.opt = opt
     self.opt_metrics = opt_metrics
-
-    self.CG = CellGeneratorInstance
+    
+    self.model = self.generate_child_network()
+    self.model_dict = self.generate_model_dict()
+    
+    self.weight_dict = weight_dict
+    self.weight_directory = make_dir(weight_directory)
+    
+    self.graph = tf.get_default_graph()
     
   def generate_child_network(self):
     for i in range(len(self.child_network_definition)):
@@ -455,32 +468,8 @@ class ChildNetworkGenerator(object):
       
     classification_layer = self.CG.generate_classification_layer(node_1)
 
-    model = Model(inputs=self.CG.input_layer, 
-                  outputs=classification_layer)
-    
-    model.compile(loss=self.opt_loss,
-                  optimizer=self.opt,
-                  metrics=self.opt_metrics)
-    return model
-
-
-class ChildNetworkManager(object):
-  def __init__(self,
-               weight_dict,
-               weight_directory="./"):
-    self.model = None
-    self.model_dict = None
-    self.weight_dict = weight_dict
-    self.weight_directory = self.make_dir(weight_directory)
-    
-  def set_model(self, model):
-    self.model = model
-    self.model_dict = self.generate_model_dict()
-    
-  def make_dir(self, weight_directory):
-    if not os.path.exists(weight_directory):
-      os.mkdir(weight_directory)
-    return weight_directory
+    return Model(inputs=self.CG.input_layer, 
+                 outputs=classification_layer)
     
   def generate_model_dict(self):
     _model_dict = {}
@@ -513,24 +502,27 @@ class ChildNetworkManager(object):
                         }
     return _model_dict
     
-  def set_layer_weight(self, save_to_disk=False):
+  def fetch_layer_weight(self, save_to_disk=False):
     _weight_dict = {}
     for l,d in self.model_dict.items():
       if d["func"] == "bn":
         continue
       if d["param"] > 0:
         weight_name = self.generate_weight_name(d)
-        print("setting weight: {0}".format(weight_name))  
+        print("keeping weight: {0}".format(weight_name))  
         if weight_name not in _weight_dict:
           _weight_dict[weight_name] = [self.model.layers[l].get_weights(), 1]
         else:
-          _weight_dict[weight_name][0] = [_weight_dict[weight_name][0][i] + self.model.layers[l].get_weights()[i] for i in range(len(_weight_dict[weight_name][0]))]
+          _weight_dict[weight_name][0] = [_weight_dict[weight_name][0][i] + \
+                                          self.model.layers[l].get_weights()[i] \
+                                          for i in range(len(_weight_dict[weight_name][0]))]
           _weight_dict[weight_name][1] += 1
           
     for wn, wl in _weight_dict.items():
       w = [wl[0][i]/wl[1] for i in range(len(wl[0]))]
       self.weight_dict[wn] = w
       if save_to_disk:
+        print("saving weights")
         joblib.dump(w, 
                     os.path.join(self.weight_directory, "{0}.joblib".format(wn)))
       
@@ -562,7 +554,10 @@ class ChildNetworkManager(object):
     
   def load_weight_file(self, file_name):
     return joblib.load(os.path.join(self.weight_directory, file_name)) 
-  
+
+  def get_weight_file_list(self):
+    return os.listdir(self.weight_directory)
+    
   def set_weight_to_layer(self, set_from_dict=True):
     file_list = self.get_weight_file_list()
     for l,d in self.model_dict.items():
@@ -578,10 +573,7 @@ class ChildNetworkManager(object):
           if weight_name in file_list:
             print("loading weight: {0}".format(weight_name))
             self.model.layers[l].set_weights(self.load_weight_file(weight_name))
-  
-  def get_weight_file_list(self):
-    return os.listdir(self.weight_directory)
-  
+
   def train_child_network(self,
                           x_train, y_train,
                           validation_data=[],
@@ -589,26 +581,31 @@ class ChildNetworkManager(object):
                           epochs = 10,
                           callbacks=[EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='auto')],
                           data_gen=None):  
-    
-    if data_gen is None:
-      self.model.fit(x_train, y_train,
-                     validation_data=validation_data,
-                     batch_size=batch_size,
-                     epochs=epochs,
-                     shuffle=True,
-                     callbacks=callbacks)
-    else:
-      data_gen.fit(x_train)
-      self.model.fit_generator(data_gen.flow(x_train, y_train,
-                                             batch_size=batch_size),
-                               validation_data=validation_data,
-                               epochs=epochs,
-                               shuffle=True,
-                               callbacks=callbacks,
-                               workers=4)
-    
+    with self.graph.as_default():
+        self.model.compile(loss=self.opt_loss,
+                           optimizer=self.opt,
+                           metrics=self.opt_metrics)
+        if data_gen is None:
+          self.model.fit(x_train, y_train,
+                         validation_data=validation_data,
+                         batch_size=batch_size,
+                         epochs=epochs,
+                         shuffle=True,
+                         callbacks=callbacks)
+        else:
+          data_gen.fit(x_train)
+          self.model.fit_generator(data_gen.flow(x_train, y_train,
+                                                 batch_size=batch_size),
+                                   validation_data=validation_data,
+                                   epochs=epochs,
+                                   shuffle=True,
+                                   callbacks=callbacks,
+                                   workers=4)
+
   def evaluate_child_network(self, 
                              x_test, y_test):
-    return self.model.evaluate(x_test, y_test)
-
-
+    with self.graph.as_default():
+        return self.model.evaluate(x_test, y_test)
+  
+  def close_tf_session(self):
+    tf.Session().close()
