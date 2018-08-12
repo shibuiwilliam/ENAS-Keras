@@ -17,11 +17,12 @@ from keras.utils import to_categorical
 from keras.optimizers import Adam, SGD
 from keras.datasets import cifar10
 from keras.preprocessing.image import ImageDataGenerator
-from keras.callbacks import EarlyStopping
+from keras.callbacks import EarlyStopping, LearningRateScheduler
 
 import tensorflow as tf
 
 from ENAS import EfficientNeuralArchitectureSearch
+from src.utils import sgdr_learning_rate, get_random_eraser, MixupGenerator
 
 
 
@@ -66,10 +67,12 @@ child_data_gen = ImageDataGenerator(
     rotation_range=90, 
     width_shift_range=0.1,
     height_shift_range=0.1,
-    horizontal_flip=True)
+    horizontal_flip=True,
+    preprocessing_function=get_random_eraser(v_l=0, v_h=255)) 
 
+data_flow_gen = MixupGenerator(x_train, y_train, batch_size=128, alpha=0.2, datagen=child_data_gen)()
 
-# In[ ]:
+nt = sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=4)
 
 
 ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
@@ -82,7 +85,7 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                num_nodes=7,
                                num_opers=5,
                                search_epochs = 100,
-                               sample_nums = 1,
+                               sample_nums = 5,
                                controller_lstm_cell_units = 32,
                                controller_baseline_decay = 0.99,
                                controller_opt = Adam(lr=0.00035, decay=1e-3, amsgrad=True),
@@ -91,20 +94,25 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                controller_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto')],
                                controller_temperature = 5.0,
                                controller_tanh_constant = 2.5,
+                               controller_normal_model_file = "cifar10_normal_controller.hdf5",
+                               controller_reduction_model_file = "cifar10_reduction_controller.hdf5",
                                child_init_filters=64,
                                child_network_definition=["N","N","R","N","N","R"],
                                child_weight_directory="./cifar10_weights",
                                child_opt_loss='categorical_crossentropy',
-                               child_opt=SGD(lr=0.001, decay=0.00001, nesterov=True),
+                               child_sample_opt=SGD(lr=0.01, decay=1e-6, nesterov=True),
+                               child_opt=SGD(lr=0.05, nesterov=True),
                                child_opt_metrics=['accuracy'],
-                               child_val_batch_size = 256,
-                               child_batch_size = 32,
-                               child_epochs = 5,
-                               child_callbacks = [EarlyStopping(monitor='val_loss', patience=2, verbose=1, mode='auto')],
+                               child_val_batch_size = 128,
+                               child_batch_size = 128,
+                               child_epochs = len(nt),
+                               child_callbacks = [EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='auto'),
+                                                 LearningRateScheduler(lambda ep: nt[ep])],
                                run_on_jupyter = False,
-                               initialize_child_weight_directory=True,
+                               initialize_child_weight_directory=False,
                                save_to_disk=True,
                                set_from_dict=True,
-                               data_gen=child_data_gen)
+                               data_gen=child_data_gen,
+                               data_flow_gen=data_flow_gen)
 ENAS.search_neural_architecture()
 

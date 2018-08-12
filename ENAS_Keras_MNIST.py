@@ -16,12 +16,13 @@ from keras import backend as K
 from keras.utils import to_categorical
 from keras.optimizers import Adam
 from keras.datasets import mnist
-from keras.callbacks import EarlyStopping
+from keras.callbacks import EarlyStopping, LearningRateScheduler
 
 import tensorflow as tf
 
 
 from ENAS import EfficientNeuralArchitectureSearch
+from src.utils import sgdr_learning_rate
 
 
 # In[ ]:
@@ -70,6 +71,7 @@ print(x_test.shape[0], 'test samples')
 # Efficient neural architecture search
 ## Micro search for CNN cells
 
+nt = sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=2)
 
 # In[ ]:
 
@@ -93,18 +95,22 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                controller_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto')],
                                controller_temperature = 5.0,
                                controller_tanh_constant = 2.5,
+                               controller_normal_model_file = "mnist_normal_controller.hdf5",
+                               controller_reduction_model_file = "mnist_reduction_controller.hdf5",
                                child_init_filters=64,
-                               child_network_definition=["N","R"],
+                               child_network_definition=["N","R","N","R"],
                                child_weight_directory="./mnist_weights",
                                child_opt_loss='categorical_crossentropy',
-                               child_opt=SGD(lr=0.001, decay=1e-6, nesterov=True),
+                               child_sample_opt=SGD(lr=0.01, decay=1e-6, nesterov=True),
+                               child_opt=SGD(lr=0.05, decay=1e-6, nesterov=True),
                                child_opt_metrics=['accuracy'],
-                               child_val_batch_size = 256,
-                               child_batch_size = 32,
-                               child_epochs = 3,
-                               child_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto')],
+                               child_val_batch_size = 128,
+                               child_batch_size = 128,
+                               child_epochs = len(nt),
+                               child_callbacks = [EarlyStopping(monitor='val_loss', patience=5, verbose=1, mode='auto'),
+                                                 LearningRateScheduler(lambda ep: nt[ep])],
                                run_on_jupyter = False,
-                               initialize_child_weight_directory=True,
+                               initialize_child_weight_directory=False,
                                save_to_disk=True,
                                set_from_dict=True,
                                data_gen=None)

@@ -179,9 +179,12 @@ class NetworkOperationController(object):
     {opt} is optional
     """
     return "{0}_{1}_{2}_{3}_{4}_{5}_{6}".format(self.network_name,
-                                                cell_type, type_num,
-                                                node_num, inputs_node_num,
-                                                LorR, operation)
+                                                cell_type, 
+                                                type_num,
+                                                node_num, 
+                                                inputs_node_num,
+                                                LorR, 
+                                                operation)
   
   def generate_input_layer(self):
     name_prefix = self.generate_layer_name(cell_type="fixed", 
@@ -216,7 +219,7 @@ class NetworkOperationController(object):
                               node_num, LorR, 
                               reduction=False):
     if reduction:
-      strides=(2,2)
+      strides= (1,1) if inputs_node_num > 1 else (2,2)
       cell_type="reduction"
       type_num = self.num_reductions
     else:
@@ -361,7 +364,7 @@ class CellGenerator(object):
     self.reduction_cell = reduction_cell    
     """ cells
     node_num = operation node in int; starts from 2
-    inputs = input node num in int
+    input_layer = input node num in int
     oper_id = operation id in int
     {node_num(int): {L: {input_layer:(int), oper_id:(int)},
                      R: {input_layer:(int), oper_id:(int)}},
@@ -522,7 +525,7 @@ class ChildNetworkController(object):
       w = [wl[0][i]/wl[1] for i in range(len(wl[0]))]
       self.weight_dict[wn] = w
       if save_to_disk:
-        print("saving weights")
+        print("saving weight: {0}".format(wn))
         joblib.dump(w, 
                     os.path.join(self.weight_directory, "{0}.joblib".format(wn)))
       
@@ -560,19 +563,45 @@ class ChildNetworkController(object):
     
   def set_weight_to_layer(self, set_from_dict=True):
     file_list = self.get_weight_file_list()
+    weights = self.model.get_weights()
+    i = 0
+    changed = False
     for l,d in self.model_dict.items():
-      if d["func"] == "bn":
-        continue
-      if d["param"] > 0:
+      if d["func"] != "bn" and d["param"] > 0:
         weight_name = self.generate_weight_name(d)
         if set_from_dict:
           if weight_name in self.weight_dict:
+            changed = True
             print("loading weight: {0}".format(weight_name))
-            self.model.layers[l].set_weights(self.weight_dict[weight_name])  
+            for w in self.weight_dict[weight_name]:
+              weights[i] = w
+              i += 1
+          elif "{0}.joblib".format(weight_name) in file_list:
+            changed = True
+            print("loading weight: {0}".format(weight_name))
+            weights_from_file = self.load_weight_file("{0}.joblib".format(weight_name))
+            for w in weights_from_file:
+              weights[i] = w
+              i += 1
+          else:
+            i += len(self.model.layers[l].weights)
         else:
           if weight_name in file_list:
+            changed = True
             print("loading weight: {0}".format(weight_name))
-            self.model.layers[l].set_weights(self.load_weight_file(weight_name))
+            weights_from_file = self.load_weight_file("{0}.joblib".format(weight_name))
+            for w in weights_from_file:
+              weights[i] = w
+              i += 1
+          else:
+            i += len(self.model.layers[l].weights)
+      else:
+        i += len(self.model.layers[l].weights)
+
+    if changed:
+      print("loading weights to model")
+      self.model.set_weights(weights)
+      print("loaded")
 
   def train_child_network(self,
                           x_train, y_train,
@@ -580,19 +609,21 @@ class ChildNetworkController(object):
                           batch_size = 32,
                           epochs = 10,
                           callbacks=[EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='auto')],
-                          data_gen=None):  
+                          data_gen=None,
+                          data_flow_gen=None):  
     with self.graph.as_default():
         self.model.compile(loss=self.opt_loss,
                            optimizer=self.opt,
                            metrics=self.opt_metrics)
-        if data_gen is None:
-          self.model.fit(x_train, y_train,
-                         validation_data=validation_data,
-                         batch_size=batch_size,
-                         epochs=epochs,
-                         shuffle=True,
-                         callbacks=callbacks)
-        else:
+        if data_flow_gen is not None:
+          self.model.fit_generator(data_flow_gen,
+                                   validation_data=validation_data,
+                                   steps_per_epoch=x_train.shape[0] // batch_size,
+                                   epochs=epochs,
+                                   shuffle=True,
+                                   callbacks=callbacks,
+                                   workers=4)
+        elif data_gen is not None:
           data_gen.fit(x_train)
           self.model.fit_generator(data_gen.flow(x_train, y_train,
                                                  batch_size=batch_size),
@@ -601,6 +632,13 @@ class ChildNetworkController(object):
                                    shuffle=True,
                                    callbacks=callbacks,
                                    workers=4)
+        else:
+          self.model.fit(x_train, y_train,
+                         validation_data=validation_data,
+                         batch_size=batch_size,
+                         epochs=epochs,
+                         shuffle=True,
+                         callbacks=callbacks)
 
   def evaluate_child_network(self, 
                              x_test, y_test):

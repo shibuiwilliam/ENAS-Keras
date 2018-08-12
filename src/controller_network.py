@@ -108,8 +108,8 @@ class ControllerRNNController(object):
 
     controller_rnn = Model(inputs=controller_input,
                            outputs=outputs)
-    
-    if self.model_file is not None:
+        
+    if self.model_file is not None and os.path.exists(self.model_file):
         controller_rnn.load_weights(self.model_file)
     return controller_rnn
     
@@ -118,7 +118,7 @@ class ControllerRNNController(object):
       if self.baseline is None:
         self.baseline = 0
       else:
-        baseline = (1 - self.baseline_decay) * (self.baseline - self.reward)
+        self.baseline -= (1 - self.baseline_decay) * (self.baseline - self.reward)
       return y_pred * (self.reward - self.baseline)
     
     def _define_loss(controller_loss):
@@ -138,7 +138,7 @@ class ControllerRNNController(object):
                                 optimizer=self.opt)
     
   def save_model(self):
-    self.controller_rnn.save(self.model_file)
+    self.controller_rnn.save_weights(self.model_file)
 
   def train_controller_rnn(self,
                            targets,

@@ -9,7 +9,7 @@ import keras
 from keras import backend as K
 from keras.utils import to_categorical
 from keras.optimizers import Adam, SGD
-from keras.callbacks import EarlyStopping
+from keras.callbacks import EarlyStopping, LearningRateScheduler
 
 import tensorflow as tf
 
@@ -42,21 +42,26 @@ class EfficientNeuralArchitectureSearch(object):
                  controller_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto')],
                  controller_temperature = 5.0,
                  controller_tanh_constant = 2.5,
+                 controller_normal_model_file = "normal_controller.hdf5",
+                 controller_reduction_model_file = "reduction_controller.hdf5",
                  child_init_filters=64,
                  child_network_definition=["N","N","R"],
                  child_weight_directory="./weights",
                  child_opt_loss='categorical_crossentropy',
-                 child_opt=SGD(lr=0.001, decay=1e-6, nesterov=True),
+                 child_sample_opt=SGD(lr=0.001, decay=1e-6, nesterov=True),
+                 child_opt=SGD(lr=0.05, decay=1e-6, nesterov=True),
                  child_opt_metrics=['accuracy'],
-                 child_val_batch_size = 256,
-                 child_batch_size = 32,
-                 child_epochs = 1,
-                 child_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto')],
+                 child_val_batch_size = 128,
+                 child_batch_size = 128,
+                 child_epochs = 150,
+                 child_callbacks = [EarlyStopping(monitor='val_loss', patience=1, verbose=1, mode='auto'),
+                                    LearningRateScheduler(lambda ep: float(np.linspace(0.05, 0.001, 20)[ep]))],
                  run_on_jupyter = True,
                  initialize_child_weight_directory=True,
                  save_to_disk=False,
                  set_from_dict=True,
-                 data_gen=None):
+                 data_gen=None,
+                 data_flow_gen=None):
         self.x_train=x_train
         self.y_train=y_train
         self.x_test=x_test
@@ -75,6 +80,8 @@ class EfficientNeuralArchitectureSearch(object):
         self.controller_temperature = controller_temperature
         self.controller_tanh_constant = controller_tanh_constant
         self.controller_input_x = np.array([[[self.num_opers+self.num_nodes]]])
+        self.controller_normal_model_file = controller_normal_model_file
+        self.controller_reduction_model_file = controller_reduction_model_file
         
         self.child_network_name=child_network_name
         self.child_classes=child_classes
@@ -83,6 +90,7 @@ class EfficientNeuralArchitectureSearch(object):
         self.child_network_definition=child_network_definition
         self.child_weight_directory=child_weight_directory
         self.child_opt_loss=child_opt_loss
+        self.child_sample_opt = child_sample_opt
         self.child_opt=child_opt
         self.child_opt_metrics=child_opt_metrics
         self.child_batch_size = child_batch_size
@@ -97,12 +105,15 @@ class EfficientNeuralArchitectureSearch(object):
         self.save_to_disk=save_to_disk
         self.set_from_dict=set_from_dict
         self.data_gen=data_gen
+        self.data_flow_gen=data_flow_gen
         self.initialize_child_weight_directory=initialize_child_weight_directory
         
         self.reward = 0
         
-        self.NCRC = self.define_controller_rnn(controller_network_name="normalcontroller")
-        self.RCRC = self.define_controller_rnn(controller_network_name="reductioncontroller")
+        self.NCRC = self.define_controller_rnn(controller_network_name="normalcontroller", 
+                                               model_file=self.controller_normal_model_file)
+        self.RCRC = self.define_controller_rnn(controller_network_name="reductioncontroller", 
+                                               model_file=self.controller_reduction_model_file)
       
         self.weight_dict = {}
         
@@ -119,7 +130,7 @@ class EfficientNeuralArchitectureSearch(object):
     def get_child_index(self, y):
         return [i for i in range(len(y))]
     
-    def define_controller_rnn(self, controller_network_name):
+    def define_controller_rnn(self, controller_network_name, model_file=None):
         return ControllerRNNController(controller_network_name=controller_network_name,
                                      num_nodes=self.num_nodes,
                                      num_opers=self.num_opers,
@@ -127,7 +138,7 @@ class EfficientNeuralArchitectureSearch(object):
                                      reward = self.reward,
                                      temperature = self.controller_temperature,
                                      tanh_constant = self.controller_tanh_constant,
-                                     model_file = None,
+                                     model_file = model_file,
                                      lstm_cell_units=self.controller_lstm_cell_units,
                                      baseline_decay=self.controller_baseline_decay,
                                      opt=self.controller_opt)
@@ -159,13 +170,13 @@ class EfficientNeuralArchitectureSearch(object):
                            reduction_cell=reduction_cell,
                            NetworkOperationControllerInstance=NOC)
         
-    def define_chile_network(self, CG):
+    def define_chile_network(self, CG, opt):
         return ChildNetworkController(child_network_definition=self.child_network_definition,
                                    CellGeneratorInstance=CG,
                                    weight_dict=self.weight_dict, 
                                    weight_directory=self.child_weight_directory,
                                    opt_loss=self.child_opt_loss,
-                                   opt=self.child_opt,
+                                   opt=opt,
                                    opt_metrics=self.child_opt_metrics)
     
     def predict_architecture(self, CRC):
@@ -216,7 +227,7 @@ class EfficientNeuralArchitectureSearch(object):
           sample_cells = self.get_sample_cells(normal_controller_pred, reduction_controller_pred)
 
           x_train_batch, y_train_batch = self.get_batch(self.child_train_index,
-                                                        self.child_val_batch_size*5,
+                                                        self.child_val_batch_size*10,
                                                         True)
           x_val_batch, y_val_batch = self.get_batch(self.child_val_index,
                                                     self.child_val_batch_size,
@@ -233,24 +244,38 @@ class EfficientNeuralArchitectureSearch(object):
             CG = self.generate_child_cell(sample_cells[i]["normal_cell"],
                                           sample_cells[i]["reduction_cell"],
                                           self.define_network_operations())
-            CNC = self.define_chile_network(CG)
+            CNC = self.define_chile_network(CG, self.child_sample_opt)
             CNC.set_weight_to_layer(set_from_dict=self.set_from_dict)
             CNC.train_child_network(x_train=x_train_batch, y_train=y_train_batch,
                                     batch_size = self.child_batch_size,
                                     epochs = 1,
                                     callbacks=None,
-                                    data_gen=self.data_gen)
+                                    data_gen=self.data_gen,
+                                    data_flow_gen=self.data_flow_gen)
             val_acc = CNC.evaluate_child_network(x_val_batch, y_val_batch)
-            CNC.close_tf_session()
-            del CNC.model
-            del CNC
-            del CG
-            
             print(val_acc)
+            CNC.close_tf_session()
+            
+            del CNC.weight_dict
+            del CNC.model
+            del CNC.CG
+            del CNC
+            del CG.NOC
+            del CG
+            gc.collect()
+            
             if best_val_acc < val_acc[1]:
               best_val_acc = val_acc[1]
               best_cell_index = i
 
+          
+          del x_train_batch
+          del y_train_batch
+          del x_val_batch
+          del y_val_batch
+          gc.collect()
+            
+            
           print("best val accuracy: {0}\nthe current best cell:".format(best_val_acc))
           for k,v in sample_cells[best_cell_index].items():
             print("{0}: {1}".format(k,v))
@@ -259,7 +284,7 @@ class EfficientNeuralArchitectureSearch(object):
           CG = self.generate_child_cell(sample_cells[best_cell_index]["normal_cell"],
                                         sample_cells[best_cell_index]["reduction_cell"],
                                         self.define_network_operations())
-          CNC = self.define_chile_network(CG)
+          CNC = self.define_chile_network(CG, self.child_opt)
 
           print("MODEL SUMMARY:\n")
           print(CNC.model.summary())
@@ -269,7 +294,8 @@ class EfficientNeuralArchitectureSearch(object):
                                   batch_size = self.child_batch_size,
                                   epochs = self.child_epochs,
                                   callbacks=self.child_callbacks,
-                                  data_gen=self.data_gen)
+                                  data_gen=self.data_gen,
+                                  data_flow_gen=self.data_flow_gen)
           CNC.fetch_layer_weight(save_to_disk=self.save_to_disk)
           for k,v in CNC.weight_dict.items():
               self.weight_dict[k] = v
@@ -296,13 +322,22 @@ class EfficientNeuralArchitectureSearch(object):
             break
             
           CNC.close_tf_session()
+          
+                    
+          del CNC.weight_dict
           del CNC.model
+          del CNC.CG
           del CNC
+          del CG.NOC
           del CG
+          gc.collect()
             
+                    
           print("{0} train controller rnn {0}".format(self._sep))
           self.train_controller_rnn(normal_pred_dict, reduction_pred_dict)
-
+          self.NCRC.save_model()
+          self.RCRC.save_model()
+            
           print("{0} training finished {0}".format(self._sep))
           print("{0} FINISHED SEARCH EPOCH {1} / {2} {0}".format(self._sep,
                                                                  e, 
