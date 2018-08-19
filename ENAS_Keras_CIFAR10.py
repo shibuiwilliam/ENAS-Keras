@@ -72,7 +72,7 @@ child_data_gen = ImageDataGenerator(
 
 data_flow_gen = MixupGenerator(x_train, y_train, batch_size=128, alpha=0.2, datagen=child_data_gen)()
 
-nt = sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=4)
+nt = sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=5, init_cycle=10)
 
 
 ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
@@ -84,8 +84,6 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                child_input_shape=(32,32,3),
                                num_nodes=7,
                                num_opers=5,
-                               search_epochs = 100,
-                               sample_nums = 5,
                                controller_lstm_cell_units = 32,
                                controller_baseline_decay = 0.99,
                                controller_opt = Adam(lr=0.00035, decay=1e-3, amsgrad=True),
@@ -100,14 +98,12 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                child_network_definition=["N","N","R","N","N","R"],
                                child_weight_directory="./cifar10_weights",
                                child_opt_loss='categorical_crossentropy',
-                               child_sample_opt=SGD(lr=0.01, decay=1e-6, nesterov=True),
                                child_opt=SGD(lr=0.05, nesterov=True),
                                child_opt_metrics=['accuracy'],
                                child_val_batch_size = 128,
                                child_batch_size = 128,
                                child_epochs = len(nt),
-                               child_callbacks = [EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='auto'),
-                                                 LearningRateScheduler(lambda ep: nt[ep])],
+                               child_lr_scedule = nt,
                                run_on_jupyter = False,
                                initialize_child_weight_directory=False,
                                save_to_disk=True,
@@ -116,3 +112,4 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                data_flow_gen=data_flow_gen)
 ENAS.search_neural_architecture()
 
+ENAS.train_best_cells()

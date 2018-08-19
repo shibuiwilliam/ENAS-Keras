@@ -71,7 +71,7 @@ print(x_test.shape[0], 'test samples')
 # Efficient neural architecture search
 ## Micro search for CNN cells
 
-nt = sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=2)
+nt = sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=4, init_cycle=10)
 
 # In[ ]:
 
@@ -80,13 +80,11 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                y_train=y_train,
                                x_test=x_test,
                                y_test=y_test,
-                               child_network_name="mnist_cnn",
+                               child_network_name="mnist-cnn",
                                child_classes=child_classes,
                                child_input_shape=(28,28,1),
                                num_nodes=6,
                                num_opers=5,
-                               search_epochs = 100,
-                               sample_nums = 5,
                                controller_lstm_cell_units = 32,
                                controller_baseline_decay = 0.99,
                                controller_opt = Adam(lr=0.00035, decay=1e-3, amsgrad=True),
@@ -101,18 +99,18 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                child_network_definition=["N","R","N","R"],
                                child_weight_directory="./mnist_weights",
                                child_opt_loss='categorical_crossentropy',
-                               child_sample_opt=SGD(lr=0.01, decay=1e-6, nesterov=True),
                                child_opt=SGD(lr=0.05, decay=1e-6, nesterov=True),
                                child_opt_metrics=['accuracy'],
                                child_val_batch_size = 128,
                                child_batch_size = 128,
                                child_epochs = len(nt),
-                               child_callbacks = [EarlyStopping(monitor='val_loss', patience=5, verbose=1, mode='auto'),
-                                                 LearningRateScheduler(lambda ep: nt[ep])],
-                               run_on_jupyter = False,
+                               child_lr_scedule = nt,
+                               run_on_jupyter = True,
                                initialize_child_weight_directory=False,
-                               save_to_disk=True,
+                               save_to_disk=False,
                                set_from_dict=True,
                                data_gen=None)
+
 ENAS.search_neural_architecture()
 
+ENAS.train_best_cells()

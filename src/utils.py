@@ -67,8 +67,8 @@ def generate_random_cell(num_nodes=5,
   return cell
 
 
-def sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=4):
-    d = [10*2**i for i in range(ranges)]
+def sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=4, init_cycle=10):
+    d = [init_cycle*2**i for i in range(ranges)]
     Tcur = np.hstack((np.array([list(range(i)) for i in d])))
     Ti = np.hstack((([np.full(i, i-1) for i in d])))
 

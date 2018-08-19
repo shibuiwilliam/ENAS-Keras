@@ -605,7 +605,7 @@ class ChildNetworkController(object):
 
   def train_child_network(self,
                           x_train, y_train,
-                          validation_data=[],
+                          validation_data=None,
                           batch_size = 32,
                           epochs = 10,
                           callbacks=[EarlyStopping(monitor='val_loss', patience=3, verbose=1, mode='auto')],
@@ -622,7 +622,9 @@ class ChildNetworkController(object):
                                    epochs=epochs,
                                    shuffle=True,
                                    callbacks=callbacks,
-                                   workers=4)
+                                   max_queue_size=20,
+                                   use_multiprocessing=True,
+                                   workers=5)
         elif data_gen is not None:
           data_gen.fit(x_train)
           self.model.fit_generator(data_gen.flow(x_train, y_train,
@@ -631,7 +633,9 @@ class ChildNetworkController(object):
                                    epochs=epochs,
                                    shuffle=True,
                                    callbacks=callbacks,
-                                   workers=4)
+                                   max_queue_size=20,
+                                   use_multiprocessing=True,
+                                   workers=5)
         else:
           self.model.fit(x_train, y_train,
                          validation_data=validation_data,
