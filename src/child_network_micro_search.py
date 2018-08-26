@@ -487,7 +487,8 @@ class ChildNetworkController(object):
                                     input_shape(str): [32,32,3](int tuple),
                                     output_shape(str): [32,32,3](int tuple),
                                     param(str): 283
-                                    }
+                                    },
+                   layer_num(next): {}, ...
                   }
     """
     for l in range(len(self.model.layers)):
@@ -622,9 +623,9 @@ class ChildNetworkController(object):
                                    epochs=epochs,
                                    shuffle=True,
                                    callbacks=callbacks,
-                                   max_queue_size=20,
+                                   max_queue_size=50,
                                    use_multiprocessing=True,
-                                   workers=5)
+                                   workers=7)
         elif data_gen is not None:
           data_gen.fit(x_train)
           self.model.fit_generator(data_gen.flow(x_train, y_train,
@@ -633,9 +634,9 @@ class ChildNetworkController(object):
                                    epochs=epochs,
                                    shuffle=True,
                                    callbacks=callbacks,
-                                   max_queue_size=20,
+                                   max_queue_size=50,
                                    use_multiprocessing=True,
-                                   workers=5)
+                                   workers=7)
         else:
           self.model.fit(x_train, y_train,
                          validation_data=validation_data,

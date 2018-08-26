@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import csv
 import sys
 import shutil
 import gc
@@ -54,6 +55,7 @@ class EfficientNeuralArchitectureSearch(object):
                  child_batch_size = 128,
                  child_epochs = len(nt),
                  child_lr_scedule = nt,
+                 start_from_record=True,
                  run_on_jupyter = True,
                  initialize_child_weight_directory=True,
                  save_to_disk=False,
@@ -97,6 +99,7 @@ class EfficientNeuralArchitectureSearch(object):
         self.child_train_index = self.get_child_index(self.y_train)
         self.child_val_index = self.get_child_index(self.y_test)
         
+        self.start_from_record = start_from_record
         self.run_on_jupyter = run_on_jupyter
         self.save_to_disk=save_to_disk
         self.set_from_dict=set_from_dict
@@ -212,9 +215,34 @@ class EfficientNeuralArchitectureSearch(object):
         else:
              return self.x_test[_batch], self.y_test[_batch]
         
-    
+    def write_record(self, epoch, lr, reward, val_loss):
+        record_file = "{0}_record.csv".format(self.child_network_name)
+        with open(record_file, "a") as f:
+            writer = csv.writer(f, lineterminator='\n')
+            if not os.path.exists(record_file):
+                writer.writerow(["epoch", "lr", "reward", "val_loss"])
+            writer.writerow([epoch, lr, reward, val_loss])
+            
+    def read_record(self):
+        record_file = "{0}_record.csv".format(self.child_network_name)
+        rec = []
+        if os.path.exists(record_file):
+            with open(record_file, 'r') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                     rec.append(row)
+            return rec
+        else:
+            return None
+
     def search_neural_architecture(self):
-        for e in range(self.child_epochs):
+        if self.start_from_record:
+            rec = self.read_record()
+            if rec is not None:
+                starting_epoch = int(rec[-1][0]) + 1
+            else:
+                starting_epoch = 0
+        for e in range(starting_epoch, self.child_epochs):
           print("SEARCH EPOCH: {0} / {1}".format(e, self.child_epochs))
           normal_controller_pred, normal_pred_dict = self.predict_architecture(self.NCRC)
           reduction_controller_pred, reduction_pred_dict = self.predict_architecture(self.RCRC)
@@ -246,6 +274,7 @@ class EfficientNeuralArchitectureSearch(object):
           val_acc = CNC.evaluate_child_network(x_val_batch, y_val_batch)
           print(val_acc)
           self.reward = val_acc[1]
+          self.write_record(e, self.child_lr_scedule[e], self.reward, val_acc[0])
         
           if self.best_val_acc < val_acc[1]:
               self.best_val_acc = val_acc[1]

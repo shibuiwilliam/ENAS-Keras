@@ -104,6 +104,7 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                child_batch_size = 128,
                                child_epochs = len(nt),
                                child_lr_scedule = nt,
+                               start_from_record=True,
                                run_on_jupyter = False,
                                initialize_child_weight_directory=False,
                                save_to_disk=True,
@@ -111,5 +112,8 @@ ENAS = EfficientNeuralArchitectureSearch(x_train=x_train,
                                data_gen=child_data_gen,
                                data_flow_gen=data_flow_gen)
 ENAS.search_neural_architecture()
+
+print(self.best_normal_cell)
+print(self.best_reduction_cell)
 
 ENAS.train_best_cells()
