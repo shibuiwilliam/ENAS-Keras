@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import csv
+import pickle
 import sys
 import shutil
 import gc
@@ -220,8 +221,9 @@ class EfficientNeuralArchitectureSearch(object):
         with open(record_file, "a") as f:
             writer = csv.writer(f, lineterminator='\n')
             if not os.path.exists(record_file):
-                writer.writerow(["epoch", "lr", "reward", "val_loss"])
-            writer.writerow([epoch, lr, reward, val_loss])
+                writer.writerow(["epoch", "lr", "reward", "val_loss", "best_val_acc"])
+            writer.writerow([epoch, lr, reward, val_loss, self.best_val_acc])
+        print("saved records so far")
             
     def read_record(self):
         record_file = "{0}_record.csv".format(self.child_network_name)
@@ -231,15 +233,36 @@ class EfficientNeuralArchitectureSearch(object):
                 reader = csv.reader(f)
                 for row in reader:
                      rec.append(row)
+            print("loaded records")
             return rec
         else:
             return None
+    
+    def save_best_cell(self):
+        normal_cell_file = "{0}_normal_cell.pkl".format(self.child_network_name)
+        with open(normal_cell_file, "wb") as f:
+            pickle.dump(self.best_normal_cell, f)
+        reduction_cell_file = "{0}_reduction_cell.pkl".format(self.child_network_name)
+        with open(reduction_cell_file, "wb") as f:
+            pickle.dump(self.best_reduction_cell, f)
+        print("saved best cells")
 
+    def load_best_cell(self):
+        normal_cell_file = "{0}_normal_cell.pkl".format(self.child_network_name)
+        with open(normal_cell_file, "rb") as f:
+            self.best_normal_cell = pickle.load(f)
+        reduction_cell_file = "{0}_reduction_cell.pkl".format(self.child_network_name)
+        with open(reduction_cell_file, "rb") as f:
+            self.best_reduction_cell = pickle.load(f)
+        print("loaded best cells")
+            
     def search_neural_architecture(self):
         if self.start_from_record:
             rec = self.read_record()
             if rec is not None:
                 starting_epoch = int(rec[-1][0]) + 1
+                self.best_val_acc = float(rec[-1][4])
+                self.load_best_cell()
             else:
                 starting_epoch = 0
         for e in range(starting_epoch, self.child_epochs):
@@ -274,12 +297,14 @@ class EfficientNeuralArchitectureSearch(object):
           val_acc = CNC.evaluate_child_network(x_val_batch, y_val_batch)
           print(val_acc)
           self.reward = val_acc[1]
-          self.write_record(e, self.child_lr_scedule[e], self.reward, val_acc[0])
         
           if self.best_val_acc < val_acc[1]:
               self.best_val_acc = val_acc[1]
               self.best_normal_cell = sample_cell["normal_cell"]
               self.best_reduction_cell = sample_cell["reduction_cell"]
+            
+          self.write_record(e, self.child_lr_scedule[e], self.reward, val_acc[0])
+          self.save_best_cell()
 
           child_train_record = {}
           child_train_record["normal_cell"] = sample_cell["normal_cell"]
