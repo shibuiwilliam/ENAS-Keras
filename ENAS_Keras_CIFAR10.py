@@ -101,7 +101,7 @@ ENAS = EfficientNeuralArchitectureSearch(
     data_flow_gen=data_flow_gen)
 ENAS.search_neural_architecture()
 
-print(self.best_normal_cell)
-print(self.best_reduction_cell)
+print(ENAS.best_normal_cell)
+print(ENAS.best_reduction_cell)
 
 ENAS.train_best_cells()
