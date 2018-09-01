@@ -98,4 +98,7 @@ ENAS = EfficientNeuralArchitectureSearch(
 
 ENAS.search_neural_architecture()
 
+print(ENAS.best_normal_cell)
+print(ENAS.best_reduction_cell)
+
 ENAS.train_best_cells()
