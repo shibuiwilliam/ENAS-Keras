@@ -7,48 +7,48 @@ import random
 import string
 import numpy as np
 
+
 def make_dir(dir_name):
     if not os.path.exists(dir_name):
-      os.makedirs(dir_name)
+        os.makedirs(dir_name)
     return dir_name
 
 
 def get_random_str(length=10, choices=None):
-  choice_char = ""
-  if choices is None:
-    choice_char += string.ascii_letters
-    choice_char += string.digits
-  else:
-    if "l" in choices:
-      choice_char += string.ascii_lowercase
-    if "c" in choices:
-      choice_char += string.ascii_uppercase
-    if "d" in choices:
-      choice_char += string.digits
-  if len(choice_char) == 0:
-    choice_char += string.ascii_letters
-    choice_char += string.digits    
-  
-  random_str = ''.join([random.choice(choice_char) for _ in range(length)])
-  return random_str
+    choice_char = ""
+    if choices is None:
+        choice_char += string.ascii_letters
+        choice_char += string.digits
+    else:
+        if "l" in choices:
+            choice_char += string.ascii_lowercase
+        if "c" in choices:
+            choice_char += string.ascii_uppercase
+        if "d" in choices:
+            choice_char += string.digits
+    if len(choice_char) == 0:
+        choice_char += string.ascii_letters
+        choice_char += string.digits
+
+    random_str = ''.join([random.choice(choice_char) for _ in range(length)])
+    return random_str
 
 
 def get_size_str(kernel_size, filters):
-  if type(kernel_size) == tuple:
-    size = list(kernel_size)
-  size.append(filters)
-  return "x".join([str(i) for i in size])
+    if type(kernel_size) == tuple:
+        size = list(kernel_size)
+    size.append(filters)
+    return "x".join([str(i) for i in size])
 
 
 def get_int_list_in_str(int_list, separator="x"):
-  if type(int_list) == tuple:
-    int_list = list(int_list)
-  return separator.join([str(i) for i in int_list])
+    if type(int_list) == tuple:
+        int_list = list(int_list)
+    return separator.join([str(i) for i in int_list])
 
 
-def generate_random_cell(num_nodes=5, 
-                         num_opers=5):
-  """
+def generate_random_cell(num_nodes=5, num_opers=5):
+    """
   node_num = operation node in int; starts from 2
   inputs = input node num in int
   oper_id = operation id in int
@@ -57,26 +57,38 @@ def generate_random_cell(num_nodes=5,
    node_num(int): {L: {input_layer:(int), oper_id:(int)},
                    R: {input_layer:(int), oper_id:(int)}} ... }
   """
-  
-  cell = {}
-  for i in range(2, num_nodes):
-    cell[i] = {"L": {"input_layer":random.choices(list(range(i)), k=1)[0],
-                     "oper_id":random.choices(list(range(num_opers)), k=1)[0]},
-               "R": {"input_layer":random.choices(list(range(i)), k=1)[0], 
-                     "oper_id":random.choices(list(range(num_opers)), k=1)[0]}}
-  return cell
+
+    cell = {}
+    for i in range(2, num_nodes):
+        cell[i] = {
+            "L": {
+                "input_layer": random.choices(list(range(i)), k=1)[0],
+                "oper_id": random.choices(list(range(num_opers)), k=1)[0]
+            },
+            "R": {
+                "input_layer": random.choices(list(range(i)), k=1)[0],
+                "oper_id": random.choices(list(range(num_opers)), k=1)[0]
+            }
+        }
+    return cell
 
 
 def sgdr_learning_rate(n_Max=0.05, n_min=0.001, ranges=4, init_cycle=10):
-    d = [init_cycle*2**i for i in range(ranges)]
+    d = [init_cycle * 2**i for i in range(ranges)]
     Tcur = np.hstack((np.array([list(range(i)) for i in d])))
-    Ti = np.hstack((([np.full(i, i-1) for i in d])))
+    Ti = np.hstack((([np.full(i, i - 1) for i in d])))
 
-    nt = n_min + (n_Max - n_min)*(1 + np.cos(np.pi*Tcur/Ti)) / 2
+    nt = n_min + (n_Max - n_min) * (1 + np.cos(np.pi * Tcur / Ti)) / 2
     return nt
 
 
-def get_random_eraser(p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=255):
+def get_random_eraser(p=0.5,
+                      s_l=0.02,
+                      s_h=0.4,
+                      r_1=0.3,
+                      r_2=1 / 0.3,
+                      v_l=0,
+                      v_h=255):
     def eraser(input_img):
         img_h, img_w, _ = input_img.shape
         p_1 = np.random.rand()
@@ -94,11 +106,18 @@ def get_random_eraser(p=0.5, s_l=0.02, s_h=0.4, r_1=0.3, r_2=1/0.3, v_l=0, v_h=2
         c = np.random.uniform(v_l, v_h)
         input_img[top:top + h, left:left + w, :] = c
         return input_img
+
     return eraser
 
 
 class MixupGenerator():
-    def __init__(self, X_train, y_train, batch_size=32, alpha=0.2, shuffle=True, datagen=None):
+    def __init__(self,
+                 X_train,
+                 y_train,
+                 batch_size=32,
+                 alpha=0.2,
+                 shuffle=True,
+                 datagen=None):
         self.X_train = X_train
         self.y_train = y_train
         self.batch_size = batch_size
@@ -112,7 +131,8 @@ class MixupGenerator():
             indexes = self.__get_exploration_order()
             itr_num = int(len(indexes) // (self.batch_size * 2))
             for i in range(itr_num):
-                batch_ids = indexes[i * self.batch_size * 2:(i + 1) * self.batch_size * 2]
+                batch_ids = indexes[i * self.batch_size * 2:(i + 1) *
+                                    self.batch_size * 2]
                 X, y = self.__data_generation(batch_ids)
                 yield X, y
 
@@ -151,11 +171,12 @@ class MixupGenerator():
 
 
 def print_gpu_ram(gpu_num):
-  gpu = GPU.getGPUs()[gpu_num]
-  process = psutil.Process(os.getpid())
-  print("Gen RAM Free: {0} | Proc size: {1}".format(humanize.naturalsize(psutil.virtual_memory().available), 
-                                                    humanize.naturalsize(process.memory_info().rss)))
-  print("GPU RAM Free: {0:.0f}MB | Used: {1:.0f}MB | Util {2:3.0f}% | Total {3:.0f}MB".format(gpu.memoryFree, 
-                                                                                              gpu.memoryUsed, 
-                                                                                              gpu.memoryUtil*100,
-                                                                                              gpu.memoryTotal))
+    gpu = GPU.getGPUs()[gpu_num]
+    process = psutil.Process(os.getpid())
+    print("Gen RAM Free: {0} | Proc size: {1}".format(
+        humanize.naturalsize(psutil.virtual_memory().available),
+        humanize.naturalsize(process.memory_info().rss)))
+    print(
+        "GPU RAM Free: {0:.0f}MB | Used: {1:.0f}MB | Util {2:3.0f}% | Total {3:.0f}MB".
+        format(gpu.memoryFree, gpu.memoryUsed, gpu.memoryUtil * 100,
+               gpu.memoryTotal))
